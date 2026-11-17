@@ -5,7 +5,7 @@ import csv, io, json, math, sys, time, urllib.error, urllib.parse, urllib.reques
 from datetime import date, datetime, timedelta, timezone
 
 CENTRO = (-23.1526, -47.0586)   # Itupeva-SP
-RAIO_KM = 100
+COBERTURA_KM = 400             # área coberta pelos dados; o raio (0 a 300 km) é escolhido na página
 DIAS_A_FRENTE = 180             # traz licitações que encerram propostas até daqui a N dias
 PNCP = "https://pncp.gov.br/api/consulta/v1/contratacoes/proposta"
 MUNICIPIOS = "https://raw.githubusercontent.com/kelvins/municipios-brasileiros/main/csv/municipios.csv"
@@ -39,15 +39,15 @@ def cidades_no_raio():
     texto = get(MUNICIPIOS)
     achadas = {}
     for l in csv.DictReader(io.StringIO(texto)):
-        d = km(CENTRO, (float(l["latitude"]), float(l["longitude"])))
-        if d <= RAIO_KM:
-            achadas[int(l["codigo_ibge"])] = {"nome": l["nome"], "uf": UF[int(l["codigo_uf"])], "km": round(d)}
+        la, lo = float(l["latitude"]), float(l["longitude"])
+        if km(CENTRO, (la, lo)) <= COBERTURA_KM:
+            achadas[int(l["codigo_ibge"])] = {"n": l["nome"], "u": UF[int(l["codigo_uf"])], "la": round(la, 4), "lo": round(lo, 4)}
     return achadas
 
 def main():
     cidades = cidades_no_raio()
-    ufs = sorted({c["uf"] for c in cidades.values()})
-    print(f"{len(cidades)} municípios no raio de {RAIO_KM} km; UFs: {ufs}")
+    ufs = sorted({c["u"] for c in cidades.values()})
+    print(f"{len(cidades)} municípios no raio de {COBERTURA_KM} km; UFs: {ufs}")
     hoje = date.today()
     limite = (hoje + timedelta(days=DIAS_A_FRENTE)).strftime("%Y%m%d")
     itens, vistos = [], set()
@@ -74,12 +74,12 @@ def main():
                 vistos.add(id_)
                 itens.append({
                     "id": id_,
-                    "objeto": (c.get("objetoCompra") or "").strip(),
+                    "objeto": (c.get("objetoCompra") or "").strip()[:400],
                     "valor": c.get("valorTotalEstimado"),
                     "modalidade": c.get("modalidadeNome") or "Outra",
                     "orgao": o.get("razaoSocial") or "",
                     "esfera": {"M": "Municipal", "E": "Estadual", "F": "Federal"}.get(o.get("esferaId"), ""),
-                    "cidade": cidades[ibge]["nome"], "uf": cidades[ibge]["uf"], "km": cidades[ibge]["km"],
+                    "ibge": ibge,
                     "abertura": c.get("dataAberturaProposta"), "encerramento": enc,
                     "link": f"https://pncp.gov.br/app/editais/{o.get('cnpj')}/{c.get('anoCompra')}/{c.get('sequencialCompra')}",
                     "origem": c.get("linkSistemaOrigem") or "",
@@ -91,8 +91,10 @@ def main():
         sys.exit("Nenhuma licitação encontrada: mantendo o data.json anterior.")
     itens.sort(key=lambda x: x["encerramento"] or "9")
     with open("data.json", "w", encoding="utf-8") as f:
-        json.dump({"atualizado": datetime.now(timezone.utc).isoformat(), "raio_km": RAIO_KM,
-                   "itens": itens}, f, ensure_ascii=False)
+        json.dump({"atualizado": datetime.now(timezone.utc).isoformat(), "cobertura_km": COBERTURA_KM,
+                   "centro": {"la": CENTRO[0], "lo": CENTRO[1]},
+                   "cidades": [{"i": k, **v} for k, v in cidades.items()],
+                   "itens": itens}, f, ensure_ascii=False, separators=(",", ":"))
     print(f"Gravado data.json com {len(itens)} licitações.")
 
 if __name__ == "__main__":

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Licitações perto de Itupeva</title>
+<title>Licitações perto de você</title>
 <style>
 :root{--bg:#f6f7f5;--card:#fff;--tx:#1d2420;--mut:#5d6a63;--bd:#d9dfda;--ac:#1f6b4a}
 @media (prefers-color-scheme:dark){:root{--bg:#141a17;--card:#1d2521;--tx:#e8eee9;--mut:#9aa8a0;--bd:#2f3a34;--ac:#5fcf9a}}
@@ -13,7 +13,13 @@ main{max-width:860px;margin:0 auto;padding:20px 16px 48px}
 h1{font-size:1.5rem;margin:0 0 4px}
 .sub{color:var(--mut);margin:0 0 16px;font-size:.9rem}
 .filtros{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin-bottom:12px}
-input,select{width:100%;padding:10px;border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--tx);font:inherit}
+label{font-size:.8rem;color:var(--mut);display:block;margin-bottom:2px}
+.raio{display:flex;gap:8px;align-items:center}
+.raio input[type=number]{width:84px}
+.raio input[type=range]{flex:1;padding:0}
+input,select,button{width:100%;padding:10px;border:1px solid var(--bd);border-radius:8px;background:var(--card);color:var(--tx);font:inherit}
+button{cursor:pointer;color:var(--ac);font-weight:600}
+.aviso{color:#a15c00;font-size:.85rem;margin:6px 0}
 .cont{color:var(--mut);font-size:.9rem;margin:8px 0}
 article{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:14px;margin-bottom:10px}
 article h2{font-size:1rem;margin:0 0 6px;font-weight:600}
@@ -21,52 +27,101 @@ article h2{font-size:1rem;margin:0 0 6px;font-weight:600}
 .tag{color:var(--ac);font-weight:600}
 .links{margin-top:8px;display:flex;gap:14px;font-size:.9rem}
 a{color:var(--ac)}
-a:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
+a:focus-visible,input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--ac);outline-offset:2px}
 </style>
 </head>
 <body>
 <main>
-<h1>Licitações perto de Itupeva</h1>
+<h1>Licitações perto de você</h1>
 <p class="sub" id="sub">Carregando…</p>
 <div class="filtros">
-  <input id="q" type="search" placeholder="Buscar no objeto ou órgão" aria-label="Buscar">
-  <select id="mod" aria-label="Tipo de licitação"><option value="">Todos os tipos</option></select>
-  <select id="cid" aria-label="Cidade"><option value="">Todas as cidades</option></select>
-  <select id="ord" aria-label="Ordenar">
-    <option value="enc">Encerra primeiro</option>
-    <option value="km">Mais perto</option>
-    <option value="val">Maior valor</option>
-  </select>
+  <div><label for="centro">Minha cidade</label>
+    <input id="centro" list="cidades" placeholder="Digite e escolha: Itupeva-SP" autocomplete="off"><datalist id="cidades"></datalist></div>
+  <div><label for="raio">Raio em km (0 a 300)</label>
+    <div class="raio"><input id="raio" type="range" min="0" max="300" step="5" value="100" aria-label="Raio em km">
+    <input id="raion" type="number" min="0" max="300" value="100" aria-label="Raio em km"></div></div>
+  <div><label for="mod">Tipo de licitação</label><select id="mod"><option value="">Todos os tipos</option></select></div>
+  <div><label for="cid">Cidade da licitação</label><select id="cid"><option value="">Todas as cidades</option></select></div>
+  <div><label for="q">Buscar</label><input id="q" type="search" placeholder="Objeto ou órgão"></div>
+  <div><label for="ord">Ordenar</label><select id="ord">
+    <option value="km">Mais perto</option><option value="enc">Encerra primeiro</option><option value="val">Maior valor</option></select></div>
 </div>
+<div class="aviso" id="aviso" hidden></div>
 <div class="cont" id="cont" aria-live="polite"></div>
 <div id="lista"></div>
+<button id="mais" hidden>Mostrar mais</button>
 </main>
 <script>
 const $ = id => document.getElementById(id);
-let itens = [];
+const PASSO = 50;
+let D, cid = {}, rotulo = {}, centro = null, limite = PASSO;
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const data = s => s ? new Date(s).toLocaleString("pt-BR",{dateStyle:"short",timeStyle:"short"}) : "—";
 const brl = v => v ? v.toLocaleString("pt-BR",{style:"currency",currency:"BRL"}) : "não informado";
-function opcoes(sel, valores){ [...new Set(valores)].sort().forEach(v => sel.add(new Option(v, v))); }
+const rad = x => x * Math.PI / 180;
+function dist(a, b){
+  const dp = rad(b.la - a.la), dl = rad(b.lo - a.lo);
+  const h = Math.sin(dp/2)**2 + Math.cos(rad(a.la)) * Math.cos(rad(b.la)) * Math.sin(dl/2)**2;
+  return 12742 * Math.asin(Math.sqrt(h));
+}
+function raio(){ return Math.min(300, Math.max(0, parseInt($("raion").value) || 0)); }
+function guardar(){ try { localStorage.setItem("lic", JSON.stringify({c: $("centro").value, r: raio()})); } catch(e){} }
+function lerGuardado(){ try { return JSON.parse(localStorage.getItem("lic")) || {}; } catch(e){ return {}; } }
+function trocarCentro(){
+  const i = rotulo[$("centro").value];
+  if (!i) return;
+  centro = cid[i];
+  D.itens.forEach(x => x._km = dist(centro, cid[x.ibge]));
+  atualizar();
+}
+function preencher(sel, valores, rotuloVazio){
+  const atual = sel.value;
+  sel.innerHTML = "";
+  sel.add(new Option(rotuloVazio, ""));
+  [...new Set(valores)].sort().forEach(v => sel.add(new Option(v, v)));
+  sel.value = [...sel.options].some(o => o.value === atual) ? atual : "";
+}
+function atualizar(){
+  if (!centro) return;
+  const r = raio();
+  const dentro = D.itens.filter(x => x._km <= r);
+  preencher($("mod"), dentro.map(x => x.modalidade), "Todos os tipos");
+  preencher($("cid"), dentro.map(x => cid[x.ibge].n + "-" + cid[x.ibge].u), "Todas as cidades");
+  const fora = dist(centro, D.centro) + r > D.cobertura_km;
+  $("aviso").hidden = !fora;
+  $("aviso").textContent = fora ? `Parte dessa área fica fora da cobertura dos dados (${D.cobertura_km} km de Itupeva). Podem faltar licitações nas bordas.` : "";
+  limite = PASSO; guardar(); render();
+}
 function render(){
-  const q = $("q").value.toLowerCase(), m = $("mod").value, c = $("cid").value, o = $("ord").value;
-  const r = itens.filter(i => (!m || i.modalidade === m) && (!c || i.cidade === c) &&
-    (!q || (i.objeto + " " + i.orgao).toLowerCase().includes(q)));
-  r.sort((a,b) => o === "km" ? a.km - b.km : o === "val" ? (b.valor||0) - (a.valor||0) : (a.encerramento||"9").localeCompare(b.encerramento||"9"));
-  $("cont").textContent = r.length + " licitações";
-  $("lista").innerHTML = r.map(i => `<article>
-    <h2>${esc(i.objeto)}</h2>
-    <div class="meta"><span class="tag">${esc(i.modalidade)}</span><span>${esc(i.cidade)}-${esc(i.uf)} (${i.km} km)</span><span>${esc(i.orgao)}</span></div>
-    <div class="meta"><span>Valor estimado: ${brl(i.valor)}</span><span>Propostas até ${data(i.encerramento)}</span></div>
-    <div class="links"><a href="${esc(i.link)}" target="_blank" rel="noopener">Ver no PNCP</a>${i.origem ? `<a href="${esc(i.origem)}" target="_blank" rel="noopener">Sistema do órgão</a>` : ""}</div>
-  </article>`).join("");
+  if (!centro) return;
+  const r = raio(), q = $("q").value.toLowerCase(), m = $("mod").value, c = $("cid").value, o = $("ord").value;
+  const l = D.itens.filter(x => x._km <= r && (!m || x.modalidade === m) &&
+    (!c || cid[x.ibge].n + "-" + cid[x.ibge].u === c) && (!q || (x.objeto + " " + x.orgao).toLowerCase().includes(q)));
+  l.sort((a,b) => o === "km" ? a._km - b._km : o === "val" ? (b.valor||0) - (a.valor||0) : (a.encerramento||"9").localeCompare(b.encerramento||"9"));
+  $("cont").textContent = l.length + " licitações em até " + r + " km de " + $("centro").value;
+  $("lista").innerHTML = l.slice(0, limite).map(x => { const k = cid[x.ibge]; return `<article>
+    <h2>${esc(x.objeto)}</h2>
+    <div class="meta"><span class="tag">${esc(x.modalidade)}</span><span>${esc(k.n)}-${esc(k.u)} (${Math.round(x._km)} km)</span><span>${esc(x.orgao)}</span></div>
+    <div class="meta"><span>Valor estimado: ${brl(x.valor)}</span><span>Propostas até ${data(x.encerramento)}</span></div>
+    <div class="links"><a href="${esc(x.link)}" target="_blank" rel="noopener">Ver no PNCP</a>${x.origem ? `<a href="${esc(x.origem)}" target="_blank" rel="noopener">Sistema do órgão</a>` : ""}</div>
+  </article>`; }).join("");
+  $("mais").hidden = l.length <= limite;
 }
 fetch("data.json").then(r => r.json()).then(d => {
-  itens = d.itens;
-  $("sub").textContent = `Raio de ${d.raio_km} km · atualizado em ${new Date(d.atualizado).toLocaleString("pt-BR",{dateStyle:"short",timeStyle:"short"})}`;
-  opcoes($("mod"), itens.map(i => i.modalidade)); opcoes($("cid"), itens.map(i => i.cidade));
-  ["q","mod","cid","ord"].forEach(id => $(id).addEventListener("input", render));
-  render();
+  D = d;
+  d.cidades.forEach(c => { cid[c.i] = c; rotulo[c.n + "-" + c.u] = c.i; });
+  $("cidades").innerHTML = Object.keys(rotulo).sort().map(k => `<option value="${esc(k)}">`).join("");
+  $("sub").textContent = "Atualizado em " + new Date(d.atualizado).toLocaleString("pt-BR",{dateStyle:"short",timeStyle:"short"});
+  const g = lerGuardado();
+  $("centro").value = rotulo[g.c] ? g.c : "Itupeva-SP";
+  $("raio").value = $("raion").value = g.r ?? 100;
+  $("centro").addEventListener("change", trocarCentro);
+  $("raio").addEventListener("input", () => { $("raion").value = $("raio").value; atualizar(); });
+  $("raion").addEventListener("input", () => { $("raio").value = raio(); atualizar(); });
+  ["mod","cid","ord"].forEach(id => $(id).addEventListener("input", () => { limite = PASSO; render(); }));
+  $("q").addEventListener("input", () => { limite = PASSO; render(); });
+  $("mais").addEventListener("click", () => { limite += PASSO; render(); });
+  trocarCentro();
 }).catch(() => { $("sub").textContent = "Ainda não há dados. Rode o workflow “Atualizar licitações” no GitHub."; });
 </script>
 </body>
